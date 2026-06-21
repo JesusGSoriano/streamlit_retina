@@ -16,6 +16,8 @@ import tempfile
 
 import numpy as np
 import pandas as pd
+import urllib.request
+
 import streamlit as st
 
 from core.device import DEVICE, USE_GPU
@@ -28,6 +30,22 @@ MODEL_PATH = os.environ.get(
     os.path.join(os.path.dirname(__file__), 'models', 'clasificador_retina_ensemble.pt'),
 )
 
+
+def get_model_url() -> str:
+    """URL opcional desde la que descargar el modelo si no está en disco.
+
+    Útil en Streamlit Cloud cuando el .pt se aloja en un GitHub Release o en
+    Hugging Face en vez de versionarlo. Se puede definir como variable de
+    entorno RETINA_MODEL_URL o como secreto de Streamlit (st.secrets).
+    """
+    url = os.environ.get('RETINA_MODEL_URL', '')
+    if not url:
+        try:
+            url = st.secrets.get('RETINA_MODEL_URL', '')
+        except Exception:
+            url = ''
+    return url
+
 VESSEL_COLOR = [0, 100, 255]    # azul (igual que el notebook)
 LEAK_COLOR = [255, 220, 0]      # amarillo (igual que el notebook)
 
@@ -39,10 +57,23 @@ st.set_page_config(
 
 
 # ── Carga del ensemble (una sola vez) ────────────────────────────────────────
+def _download_model(url: str, dst: str):
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with st.spinner('Descargando el modelo (solo la primera vez)…'):
+        urllib.request.urlretrieve(url, dst)
+
+
 @st.cache_resource(show_spinner='Cargando ensemble de clasificación…')
 def get_ensemble(path: str):
     if not os.path.exists(path):
-        return None
+        url = get_model_url()
+        if not url:
+            return None
+        try:
+            _download_model(url, path)
+        except Exception as e:
+            st.error(f'No se pudo descargar el modelo desde la URL configurada: {e}')
+            return None
     return load_ensemble(path, device=DEVICE)
 
 

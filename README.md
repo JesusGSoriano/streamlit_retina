@@ -107,33 +107,31 @@ modelos y se decide con el `threshold`. La clase 1 es **db/db**.
 
 ### Gestión del modelo `.pt` (importante)
 
-El modelo es pesado y **no conviene versionarlo directamente** en el repositorio
-(por defecto está en `.gitignore`). Opciones, de más a menos recomendable para
-una demo de validación interna:
+El modelo (ensemble de 5 ResNet18) pesa **~214 MB**, por encima del límite de
+100 MB para archivos normales de GitHub. Opciones:
 
-- **Git LFS** — cómodo si el `.pt` pesa **< 100 MB**. Streamlit Cloud soporta
-  LFS. Instalar `git lfs`, `git lfs track "*.pt"`, commitear `.gitattributes` y
-  el modelo. (Atención al límite de almacenamiento/ancho de banda de LFS en
-  GitHub.)
-- **GitHub Release o Hugging Face Hub** — sube el `.pt` como *asset* de una
-  release o a un repo de modelos, y descárgalo en el arranque dentro de
-  `@st.cache_resource`. Es la opción más limpia si el archivo supera los
-  ~100 MB o quieres evitar LFS. Ejemplo de descarga:
+- **GitHub Release o Hugging Face Hub (recomendado).** Sube el `.pt` como
+  *asset* de una release (o a un repo de modelos en HF). La descarga de assets
+  de release es gratuita y **no consume cuota de LFS**, así que es lo más
+  robusto para una demo que se rehace varias veces. La app ya soporta esto: si
+  el `.pt` no está en disco, lo descarga de la URL indicada en la variable
+  `RETINA_MODEL_URL` (variable de entorno o secreto de Streamlit) y lo cachea.
 
-  ```python
-  import os, urllib.request
-  os.makedirs('models', exist_ok=True)
-  url = 'https://<tu-release-o-hf>/clasificador_retina_ensemble.pt'
-  dst = 'models/clasificador_retina_ensemble.pt'
-  if not os.path.exists(dst):
-      urllib.request.urlretrieve(url, dst)
+  En Streamlit Cloud: *Settings → Secrets* y añade:
+  ```toml
+  RETINA_MODEL_URL = "https://github.com/JesusGSoriano/streamlit_retina/releases/download/v1.0/clasificador_retina_ensemble.pt"
   ```
 
-- **Almacenamiento externo (Drive/bucket)** — válido, pero requiere gestionar
-  credenciales/enlaces; menos cómodo que las dos opciones anteriores.
+- **Git LFS.** Funciona (cabe en el 1 GB de almacenamiento), pero LFS solo da
+  **1 GB de ancho de banda/mes** gratis y Streamlit Cloud descarga el modelo en
+  cada *rebuild*; con ~5 rebuilds se agota la cuota y la app deja de poder
+  cargar el modelo. Si aun así lo usas: `git lfs install`, `git lfs track
+  "*.pt"`, commitear `.gitattributes` y el `.pt`. (Ojo: el `.gitignore` **no**
+  debe ignorar `models/*.pt` o LFS no podrá añadirlo.)
 
 > 5 ResNet18 en CPU caben de sobra en la RAM del tier gratuito de Streamlit
-> Cloud (~1 GB). El `@st.cache_resource` carga el ensemble **una sola vez**.
+> Cloud (~1 GB). El `@st.cache_resource` carga el ensemble **una sola vez** por
+> sesión del servidor.
 
 ### Wheel de PyTorch en CPU (opcional, despliegue más ligero)
 
