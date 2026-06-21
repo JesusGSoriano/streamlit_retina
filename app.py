@@ -25,18 +25,31 @@ from core.pipeline import analyze_image
 from core.classifier import load_ensemble, classify_image
 
 # ── Configuración ────────────────────────────────────────────────────────────
+MODEL_FILENAME = 'clasificador_retina_ensemble.pt'
+
 MODEL_PATH = os.environ.get(
     'RETINA_MODEL_PATH',
-    os.path.join(os.path.dirname(__file__), 'models', 'clasificador_retina_ensemble.pt'),
+    os.path.join(os.path.dirname(__file__), 'models', MODEL_FILENAME),
 )
+
+# URL pública del modelo (asset del GitHub Release). Sirve de valor por defecto
+# para que la app descargue el modelo automáticamente en el despliegue sin tener
+# que configurar nada. Se puede sobreescribir con RETINA_MODEL_URL.
+DEFAULT_MODEL_URL = (
+    'https://github.com/JesusGSoriano/streamlit_retina/releases/download/'
+    'v1.0/clasificador_retina_ensemble.pt'
+)
+
+# Ruta de descarga garantizada como escribible (en Streamlit Cloud la carpeta
+# del repo puede no serlo).
+DOWNLOAD_PATH = os.path.join(tempfile.gettempdir(), MODEL_FILENAME)
 
 
 def get_model_url() -> str:
-    """URL opcional desde la que descargar el modelo si no está en disco.
+    """URL desde la que descargar el modelo si no está en disco.
 
-    Útil en Streamlit Cloud cuando el .pt se aloja en un GitHub Release o en
-    Hugging Face en vez de versionarlo. Se puede definir como variable de
-    entorno RETINA_MODEL_URL o como secreto de Streamlit (st.secrets).
+    Orden de preferencia: variable de entorno RETINA_MODEL_URL > secreto de
+    Streamlit (st.secrets) > URL por defecto del GitHub Release.
     """
     url = os.environ.get('RETINA_MODEL_URL', '')
     if not url:
@@ -44,7 +57,7 @@ def get_model_url() -> str:
             url = st.secrets.get('RETINA_MODEL_URL', '')
         except Exception:
             url = ''
-    return url
+    return url or DEFAULT_MODEL_URL
 
 VESSEL_COLOR = [0, 100, 255]    # azul (igual que el notebook)
 LEAK_COLOR = [255, 220, 0]      # amarillo (igual que el notebook)
@@ -59,22 +72,27 @@ st.set_page_config(
 # ── Carga del ensemble (una sola vez) ────────────────────────────────────────
 def _download_model(url: str, dst: str):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    with st.spinner('Descargando el modelo (solo la primera vez)…'):
+    with st.spinner('Descargando el modelo (~220 MB, solo la primera vez)…'):
         urllib.request.urlretrieve(url, dst)
 
 
 @st.cache_resource(show_spinner='Cargando ensemble de clasificación…')
-def get_ensemble(path: str):
-    if not os.path.exists(path):
-        url = get_model_url()
-        if not url:
-            return None
-        try:
-            _download_model(url, path)
-        except Exception as e:
-            st.error(f'No se pudo descargar el modelo desde la URL configurada: {e}')
-            return None
-    return load_ensemble(path, device=DEVICE)
+def get_ensemble():
+    # 1. ¿Está ya en disco? (local o vía Git LFS, o descargado antes)
+    for path in (MODEL_PATH, DOWNLOAD_PATH):
+        if os.path.exists(path):
+            return load_ensemble(path, device=DEVICE)
+
+    # 2. Descargar desde la URL (release/HF) a una ruta escribible
+    url = get_model_url()
+    if not url:
+        return None
+    try:
+        _download_model(url, DOWNLOAD_PATH)
+    except Exception as e:
+        st.error(f'No se pudo descargar el modelo desde {url}\n\n{e}')
+        return None
+    return load_ensemble(DOWNLOAD_PATH, device=DEVICE)
 
 
 def make_vessel_overlay(img_rgb: np.ndarray, vessel_mask: np.ndarray) -> np.ndarray:
@@ -191,7 +209,7 @@ def main():
         'estudio de la **retinopatía diabética**.'
     )
 
-    ensemble = get_ensemble(MODEL_PATH)
+    ensemble = get_ensemble()
 
     # ── Barra lateral ──
     with st.sidebar:
@@ -204,8 +222,8 @@ def main():
                 f'img_size={ensemble.img_size} · threshold={ensemble.threshold}'
             )
         else:
-            st.error('Modelo de clasificación no encontrado')
-            st.caption(f'Ruta esperada: `{MODEL_PATH}`')
+            st.error('Modelo de clasificación no disponible')
+            st.caption(f'Origen configurado: `{get_model_url()}`')
         st.divider()
         st.markdown(
             '**Pasos del pipeline:**\n'
