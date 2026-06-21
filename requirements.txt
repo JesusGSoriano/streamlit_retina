@@ -1,0 +1,16 @@
+# Dependencias de la demo de análisis retiniano (TFM / CIPF)
+# Versiones con cota inferior conservadora para maximizar la compatibilidad
+# en Streamlit Community Cloud (despliegue en CPU).
+
+streamlit>=1.30
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+scipy>=1.10
+scikit-image>=0.21
+opencv-python-headless>=4.7
+pillow>=9.5
+pandas>=2.0
+skan>=0.11
+networkx>=3.0
+matplotlib>=3.7
