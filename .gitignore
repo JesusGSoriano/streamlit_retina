@@ -21,9 +21,8 @@ ENV/
 # Streamlit
 .streamlit/secrets.toml
 
-# Modelos pesados (se gestionan aparte: ver README)
-models/*.pt
-models/*.pth
+# Modelos: se versionan con Git LFS (ver .gitattributes y README).
+# No los ignoramos aquí o LFS no podría añadirlos.
 
 # Imágenes de prueba locales
 sample_images/*.tif
