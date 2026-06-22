@@ -21,7 +21,7 @@ from .leakage import detect_fluorescein_leakage
 
 # Métricas escalares que exponemos (sin arrays internos como diámetros/esqueleto)
 _SKEL_SCALAR_KEYS = (
-    'n_vessel_segments', 'mean_diameter_px', 'std_diameter_px',
+    'n_vessel_segments', 'calibre_px', 'std_diameter_px',
     'mean_tortuosity', 'std_tortuosity', 'total_length_px',
 )
 
@@ -32,7 +32,7 @@ def analyze_image(path: str, device: torch.device = None) -> dict:
     Devuelve un dict con:
       - arrays: img_rgb, img_green, img_clahe, fov_mask, vessel_mask,
                 frangi_response, leakage_mask, leak_props, skeleton, dist_transform
-      - métricas: vessel_density_pct, n_vessel_segments, mean_diameter_px,
+      - métricas: vessel_density_pct, n_vessel_segments, calibre_px,
                   mean_tortuosity, total_length_px, n_leaks, total_leak_area_px, ...
       - error: None si todo fue bien, o un mensaje.
     """

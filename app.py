@@ -119,8 +119,8 @@ def metrics_dataframe(res: dict) -> pd.DataFrame:
     rows = [
         ('Densidad vascular', fmt(res.get('vessel_density_pct'), ' %')),
         ('Nº segmentos vasculares', fmt(res.get('n_vessel_segments'))),
-        ('Calibre medio', fmt(res.get('mean_diameter_px'), ' px')),
-        ('Tortuosidad media', fmt(res.get('mean_tortuosity'), '', 3)),
+        ('Calibre (mediana, px)', fmt(res.get('calibre_px'), ' px')),
+        ('Tortuosidad (trayecto largo)', fmt(res.get('mean_tortuosity'), '', 3)),
         ('Longitud total de la red', fmt(res.get('total_length_px'), ' px')),
         ('Nº fugas de fluoresceína', fmt(res.get('n_leaks'))),
         ('Área total de fugas', fmt(res.get('total_leak_area_px'), ' px')),

@@ -10,8 +10,8 @@ A partir de una imagen `.tif` de fondo de ojo, la demo:
 1. **Preprocesa** la imagen: canal verde, máscara FOV (región del ojo) y CLAHE.
 2. **Segmenta la red vascular** con un filtro de Frangi multiescala en PyTorch
    (GPU o CPU) combinado con top-hat morfológico.
-3. **Extrae métricas vasculares**: densidad, calibre medio, nº de segmentos,
-   tortuosidad media y longitud total de la red.
+3. **Extrae métricas vasculares**: densidad, calibre (mediana), nº de segmentos,
+   tortuosidad sobre trayectos largos y longitud total de la red.
 4. **Detecta fugas de fluoresceína** (zonas hiperfluorescentes difusas),
    excluyendo el disco óptico y la zona vascular central densa.
 5. **Clasifica** la imagen como **Control** (sano) o **db/db** (enfermo) con un
