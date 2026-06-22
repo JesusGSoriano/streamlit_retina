@@ -24,7 +24,7 @@ from core.device import DEVICE, USE_GPU
 from core.pipeline import analyze_image
 from core.classifier import load_ensemble, classify_image
 
-# ── Configuración ────────────────────────────────────────────────────────────
+# Configuración
 MODEL_FILENAME = 'clasificador_retina_ensemble.pt'
 
 MODEL_PATH = os.environ.get(
@@ -63,13 +63,12 @@ VESSEL_COLOR = [0, 100, 255]    # azul (igual que el notebook)
 LEAK_COLOR = [255, 220, 0]      # amarillo (igual que el notebook)
 
 st.set_page_config(
-    page_title='Análisis Retiniano — TFM/CIPF',
-    page_icon='👁️',
+    page_title='Análisis de imágenes retinianas — TFM/CIPF',
     layout='wide',
 )
 
 
-# ── Carga del ensemble (una sola vez) ────────────────────────────────────────
+# Carga del ensemble (una sola vez)
 def _download_model(url: str, dst: str):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with st.spinner('Descargando el modelo (~220 MB, solo la primera vez)…'):
@@ -148,25 +147,25 @@ def analyze_uploaded_file(uploaded_file, ensemble):
 
 
 def render_result(name: str, res: dict, clf: dict, ensemble):
-    st.subheader(f'📄 {name}')
+    st.subheader(name)
 
     if res['error'] is not None:
         st.error(f'No se pudo procesar la imagen: {res["error"]}')
         return
 
-    # ── Veredicto del clasificador ──
+    # Clasificación
     if ensemble is None:
         st.warning(
-            'Modelo de clasificación no disponible — se muestran solo las '
-            'métricas del pipeline. (Coloca `clasificador_retina_ensemble.pt` '
-            'en la carpeta `models/`.)'
+            'Modelo de clasificación no disponible; se muestran solo las '
+            'métricas del pipeline.'
         )
     elif clf is not None:
         prob = clf['prob_dbdb']
+        label = 'db/db (enfermo)' if clf['pred'] == 1 else 'Control (sano)'
         if clf['pred'] == 1:
-            st.error(f'### 🔴 Veredicto: **db/db (Enfermo)**')
+            st.error(f'Clasificación: **{label}**')
         else:
-            st.success(f'### 🟢 Veredicto: **Control (Sano)**')
+            st.success(f'Clasificación: **{label}**')
         c1, c2 = st.columns(2)
         c1.metric('Probabilidad db/db', f'{prob*100:.1f} %')
         c2.metric('Probabilidad Control', f'{(1-prob)*100:.1f} %')
@@ -174,11 +173,11 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
         st.caption(
             'Probabilidad media del ensemble de 5 modelos. '
             f'Umbral de decisión: {ensemble.threshold:.2f}. '
-            f'Probabilidades por modelo: '
+            'Probabilidades por modelo: '
             + ', '.join(f'{p:.2f}' for p in clf['per_model_probs'])
         )
 
-    # ── Imágenes ──
+    # Imágenes
     col1, col2, col3 = st.columns(3)
     with col1:
         st.image(res['img_rgb'], caption='Original', use_container_width=True)
@@ -194,7 +193,7 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
             use_container_width=True,
         )
 
-    # ── Métricas ──
+    # Métricas
     st.markdown('**Métricas vasculares**')
     st.dataframe(metrics_dataframe(res), hide_index=True, use_container_width=True)
 
@@ -202,46 +201,46 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
 
 
 def main():
-    st.title('👁️ Análisis automático de imágenes retinianas')
+    st.title('Análisis automático de imágenes retinianas')
     st.markdown(
-        'Demo del pipeline del TFM (en colaboración con el **CIPF**) para el '
-        'análisis de angiografías de fluoresceína de modelos murinos en el '
-        'estudio de la **retinopatía diabética**.'
+        'Análisis de angiografías de fluoresceína de modelos murinos para el '
+        'estudio de la retinopatía diabética. Trabajo Fin de Máster en '
+        'colaboración con el Centro de Investigación Príncipe Felipe (CIPF).'
     )
 
     ensemble = get_ensemble()
 
-    # ── Barra lateral ──
+    # Barra lateral
     with st.sidebar:
-        st.header('ℹ️ Información')
-        st.write(f'**Dispositivo:** {"GPU (CUDA)" if USE_GPU else "CPU"}')
+        st.header('Información')
+        st.write(f'**Dispositivo de cómputo:** {"GPU (CUDA)" if USE_GPU else "CPU"}')
         if ensemble is not None:
-            st.success('Modelo de clasificación cargado ✓')
+            st.write('**Clasificador:** disponible')
             st.caption(
                 f'Ensemble de {len(ensemble.models)} ResNet18 · '
-                f'img_size={ensemble.img_size} · threshold={ensemble.threshold}'
+                f'img_size={ensemble.img_size} · umbral={ensemble.threshold}'
             )
         else:
-            st.error('Modelo de clasificación no disponible')
+            st.write('**Clasificador:** no disponible')
             st.caption(f'Origen configurado: `{get_model_url()}`')
         st.divider()
         st.markdown(
-            '**Pasos del pipeline:**\n'
-            '1. Preprocesado (canal verde + FOV + CLAHE)\n'
-            '2. Segmentación vascular (Frangi + top-hat)\n'
+            '**Etapas del análisis**\n\n'
+            '1. Preprocesado (canal verde, máscara FOV, CLAHE)\n'
+            '2. Segmentación vascular (Frangi multiescala y top-hat)\n'
             '3. Métricas vasculares\n'
-            '4. Detección de fugas\n'
-            '5. Clasificación Control vs db/db'
+            '4. Detección de fugas de fluoresceína\n'
+            '5. Clasificación Control frente a db/db'
         )
 
     uploaded_files = st.file_uploader(
-        'Sube una o varias imágenes de fondo de ojo (.tif)',
+        'Seleccione una o varias imágenes de fondo de ojo (.tif)',
         type=['tif', 'tiff'],
         accept_multiple_files=True,
     )
 
     if not uploaded_files:
-        st.info('⬆️ Sube al menos una imagen `.tif` para comenzar el análisis.')
+        st.info('Suba al menos una imagen .tif para iniciar el análisis.')
         return
 
     for uploaded_file in uploaded_files:

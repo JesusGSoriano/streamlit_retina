@@ -1,4 +1,4 @@
-# 👁️ Demo — Análisis automático de imágenes retinianas (TFM / CIPF)
+# Análisis automático de imágenes retinianas (TFM / CIPF)
 
 Demo en **Streamlit** del pipeline desarrollado en mi Trabajo Fin de Máster, en
 colaboración con el **Centro de Investigación Príncipe Felipe (CIPF)**, para el
@@ -17,12 +17,12 @@ A partir de una imagen `.tif` de fondo de ojo, la demo:
 5. **Clasifica** la imagen como **Control** (sano) o **db/db** (enfermo) con un
    ensemble de 5 ResNet18.
 
-> ⚠️ Es una demo para **validar la efectividad** de lo desarrollado, no un
-> producto clínico final.
+> Nota: es una herramienta para validar la efectividad de lo desarrollado, no
+> un producto clínico final.
 
 ---
 
-## 📁 Estructura del proyecto
+## Estructura del proyecto
 
 La lógica del pipeline está **separada de la interfaz**, de modo que los mismos
 módulos `core/` se puedan reutilizar desde una futura app de escritorio.
@@ -49,7 +49,7 @@ visualización**.
 
 ---
 
-## ▶️ Ejecución en local
+## Ejecución en local
 
 Requiere Python 3.10+.
 
@@ -77,7 +77,7 @@ modelo se puede sobreescribir con la variable de entorno `RETINA_MODEL_PATH`.
 
 ---
 
-## 🧠 El modelo (`clasificador_retina_ensemble.pt`)
+## El modelo (`clasificador_retina_ensemble.pt`)
 
 Es un diccionario de PyTorch con un **ensemble de 5 ResNet18** entrenados con
 transfer learning (LOAO-CV, 5 seeds). Estructura esperada:
@@ -98,7 +98,7 @@ modelos y se decide con el `threshold`. La clase 1 es **db/db**.
 
 ---
 
-## ☁️ Despliegue en Streamlit Community Cloud
+## Despliegue en Streamlit Community Cloud
 
 1. Sube este repositorio a GitHub.
 2. En [share.streamlit.io](https://share.streamlit.io) crea una nueva app
@@ -145,7 +145,7 @@ principio de `requirements.txt`:
 
 ---
 
-## 🔬 Notas de fidelidad
+## Notas de fidelidad
 
 El pipeline replica **literalmente** las funciones del notebook del TFM
 (escalas de Frangi, umbrales de histéresis, parámetros de detección de fugas,
