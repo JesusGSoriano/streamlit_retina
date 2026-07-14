@@ -12,6 +12,8 @@ La lógica vive en `core/`; este archivo solo se encarga de la interfaz.
 """
 
 import os
+import json
+import html
 import tempfile
 
 import numpy as np
@@ -19,6 +21,7 @@ import pandas as pd
 import urllib.request
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.device import DEVICE, USE_GPU
 from core.pipeline import analyze_image
@@ -63,7 +66,7 @@ VESSEL_COLOR = [0, 100, 255]    # azul (igual que el notebook)
 LEAK_COLOR = [255, 220, 0]      # amarillo (igual que el notebook)
 
 st.set_page_config(
-    page_title='Análisis de imágenes retinianas — TFM/CIPF',
+    page_title='Análisis de imágenes retinianas (v2) — TFM/CIPF',
     layout='wide',
 )
 
@@ -126,6 +129,70 @@ def metrics_dataframe(res: dict) -> pd.DataFrame:
         ('Área total de fugas', fmt(res.get('total_leak_area_px'), ' px')),
     ]
     return pd.DataFrame(rows, columns=['Métrica', 'Valor'])
+
+
+def render_metrics_table(mdf: pd.DataFrame, key: str):
+    """Tabla de métricas con un único botón 'Copiar' integrado.
+
+    Al pulsarlo copia los datos en formato tabulado (TSV) al portapapeles, de
+    modo que al pegar en Excel/Sheets cada métrica y su valor caen en columnas.
+    """
+    headers = list(mdf.columns)
+    body_rows = mdf.astype(str).values.tolist()
+    tsv = mdf.to_csv(sep='\t', index=False)
+
+    thead = ''.join(f'<th>{html.escape(h)}</th>' for h in headers)
+    tbody = ''.join(
+        '<tr>' + ''.join(f'<td>{html.escape(c)}</td>' for c in row) + '</tr>'
+        for row in body_rows
+    )
+
+    html_block = f"""
+    <style>
+      .mt-wrap {{ font-family: "Source Sans Pro", -apple-system, Segoe UI, Roboto, sans-serif; }}
+      .mt-head {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }}
+      .mt-title {{ font-size:0.95rem; font-weight:600; }}
+      .mt-btn {{ border:1px solid #b9c0c8; background:#f6f8fa; color:#24292f;
+                 border-radius:6px; padding:4px 12px; font-size:0.82rem; cursor:pointer; }}
+      .mt-btn:hover {{ background:#eef1f4; }}
+      table.mt {{ border-collapse:collapse; width:100%; font-size:0.9rem; }}
+      table.mt th, table.mt td {{ border:1px solid #d9dde1; padding:6px 12px; text-align:left; }}
+      table.mt th {{ background:#f2f4f6; font-weight:600; }}
+      table.mt td:last-child, table.mt th:last-child {{ text-align:right;
+                 font-variant-numeric:tabular-nums; }}
+      @media (prefers-color-scheme: dark) {{
+        .mt-title {{ color:#e6e6e6; }}
+        .mt-btn {{ border-color:#3a3f44; background:#2b2f36; color:#e6e6e6; }}
+        .mt-btn:hover {{ background:#343a42; }}
+        table.mt th, table.mt td {{ border-color:#3a3f44; color:#e6e6e6; }}
+        table.mt th {{ background:#22262c; }}
+      }}
+    </style>
+    <div class="mt-wrap">
+      <div class="mt-head">
+        <span class="mt-title">Métricas vasculares</span>
+        <button class="mt-btn" id="btn-{key}" onclick="copyMetrics_{key}()">Copiar</button>
+      </div>
+      <table class="mt"><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>
+    </div>
+    <script>
+      function copyMetrics_{key}() {{
+        const data = {json.dumps(tsv)};
+        const ta = document.createElement('textarea');
+        ta.value = data;
+        ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        let ok = false;
+        try {{ ok = document.execCommand('copy'); }} catch (e) {{ ok = false; }}
+        if (navigator.clipboard) {{ try {{ navigator.clipboard.writeText(data); ok = true; }} catch (e) {{}} }}
+        document.body.removeChild(ta);
+        const b = document.getElementById('btn-{key}');
+        b.textContent = ok ? 'Copiado' : 'Pulsa Ctrl+C';
+        setTimeout(() => {{ b.textContent = 'Copiar'; }}, 1600);
+      }}
+    </script>
+    """
+    components.html(html_block, height=90 + 33 * (len(body_rows) + 1))
 
 
 def analyze_uploaded_file(uploaded_file, ensemble):
@@ -194,22 +261,15 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
         )
 
     # Métricas
-    st.markdown('**Métricas vasculares**')
     mdf = metrics_dataframe(res)
-    st.dataframe(mdf, hide_index=True, use_container_width=True)
-    with st.expander('Copiar métricas al portapapeles'):
-        st.caption(
-            'Pulse el icono de copiar (esquina superior derecha del recuadro) y '
-            'pegue en Excel o en una hoja de cálculo: cada métrica y su valor '
-            'quedan en columnas separadas.'
-        )
-        st.code(mdf.to_csv(sep='\t', index=False), language=None)
+    table_key = ''.join(ch if ch.isalnum() else '_' for ch in name)
+    render_metrics_table(mdf, key=table_key)
 
     st.divider()
 
 
 def main():
-    st.title('Análisis automático de imágenes retinianas')
+    st.title('Análisis automático de imágenes retinianas — versión 2')
     st.markdown(
         'Análisis de angiografías de fluoresceína de modelos murinos para el '
         'estudio de la retinopatía diabética. Trabajo Fin de Máster en '

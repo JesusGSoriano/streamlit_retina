@@ -1,7 +1,9 @@
 """Segmentación de la red vascular.
 
 Filtro de Frangi multiescala implementado en PyTorch (funciona en GPU o CPU)
-combinado con top-hat morfológico. Portado literalmente del notebook del TFM.
+combinado con top-hat morfológico. Basado en el notebook del TFM, con un
+post-procesado más estricto (recorte circular del FOV y filtro de forma) para
+ceñirse al trazado real del vaso y no contar bordes ni moteado de fondo.
 """
 
 import numpy as np
@@ -10,10 +12,57 @@ import torch.nn.functional as F
 
 from scipy import ndimage
 from skimage import morphology
-from skimage.morphology import disk
+from skimage.morphology import disk, skeletonize
+from skimage.measure import label as sk_label, regionprops
 
 from .device import DEVICE, USE_GPU
 from .preprocessing import tophat_gpu
+
+
+def inner_fov_mask(fov_mask: np.ndarray, shrink: float = 0.90,
+                   erosion: int = 6) -> np.ndarray:
+    """Región de análisis interior al FOV.
+
+    El borde del círculo del ojo (y los bloques brillantes que aparecen donde el
+    círculo toca el marco de la imagen) se colaban como vaso y falseaban las
+    métricas. Definimos la zona válida como un círculo concéntrico algo más
+    pequeño que el FOV (recorte proporcional al radio, robusto al tamaño de la
+    imagen), intersecado con el propio FOV y erosionado un poco.
+    """
+    ys, xs = np.where(fov_mask > 0)
+    if len(xs) == 0:
+        return fov_mask.astype(bool)
+    cy, cx = ys.mean(), xs.mean()
+    r_eq = np.sqrt(fov_mask.sum() / np.pi)
+    H, W = fov_mask.shape
+    yy, xx = np.ogrid[:H, :W]
+    circle = (xx - cx) ** 2 + (yy - cy) ** 2 <= (r_eq * shrink) ** 2
+    inner = circle & (fov_mask > 0)
+    if erosion > 0:
+        inner = morphology.binary_erosion(inner, disk(erosion))
+    return inner
+
+
+def keep_vessel_like(mask: np.ndarray, min_size: int = 60,
+                     ecc_min: float = 0.85, large_area_factor: int = 6) -> np.ndarray:
+    """Descarta manchas compactas (moteado, brillos) y conserva lo tubular.
+
+    Para cada componente conexa se mira su tamaño y su forma:
+      - Las componentes grandes (el árbol vascular principal) se conservan.
+      - Las pequeñas solo se conservan si son alargadas (excentricidad alta),
+        que es la firma de un vaso; las redondeadas (moteado) se eliminan.
+    """
+    labeled = sk_label(mask)
+    if labeled.max() == 0:
+        return np.zeros_like(mask, dtype=bool)
+    out = np.zeros_like(mask, dtype=bool)
+    large_area = large_area_factor * min_size
+    for p in regionprops(labeled):
+        if p.area < min_size:
+            continue
+        if p.area >= large_area or p.eccentricity >= ecc_min:
+            out[labeled == p.label] = True
+    return out
 
 
 def frangi_multiscale_gpu(img_clahe: np.ndarray,
@@ -92,10 +141,13 @@ def frangi_multiscale_gpu(img_clahe: np.ndarray,
 
 def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         device: torch.device = None,
-                        border_margin: int = 15,
-                        seed_pct: float = 0.90,
-                        expand_pct: float = 0.62,
-                        min_object_size: int = 50) -> tuple:
+                        frangi_weight: float = 0.8,
+                        fov_shrink: float = 0.90,
+                        fov_erosion: int = 6,
+                        seed_pct: float = 0.92,
+                        expand_pct: float = 0.70,
+                        min_object_size: int = 60,
+                        blob_ecc_min: float = 0.85) -> tuple:
     if device is None:
         device = DEVICE
     H, W = img_clahe.shape
@@ -111,21 +163,21 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     if th_max > 0:
         tophat_resp = tophat_resp / th_max
 
-    combined = 0.7 * frangi_resp + 0.3 * tophat_resp
+    # Más peso al Frangi (específico de vasos) que al top-hat, que enciende
+    # cualquier zona brillante aunque no sea vascular (bordes, brillos de fondo).
+    combined = frangi_weight * frangi_resp + (1.0 - frangi_weight) * tophat_resp
     combined = combined * fov_t.squeeze()
 
-    # Excluimos un margen del borde del FOV. El anillo brillante del borde de la
-    # imagen (arriba/abajo/izquierda/derecha del círculo del ojo) se colaba como
-    # vaso y falseaba las métricas. Erosionamos el FOV y trabajamos dentro de esa
-    # región tanto para calcular los umbrales (para que el brillo del borde no los
-    # sesgue) como para la máscara final.
-    fov_inner = morphology.binary_erosion(fov_mask.astype(bool), disk(border_margin))
+    # Región de análisis: interior circular del FOV. Elimina de raíz el anillo del
+    # borde del ojo y los bloques brillantes de los extremos (arriba/abajo/
+    # izquierda/derecha), y evita que ese brillo sesgue los umbrales.
+    fov_inner = inner_fov_mask(fov_mask, shrink=fov_shrink, erosion=fov_erosion)
     fov_inner_t = torch.tensor(fov_inner.astype(np.float32), device=device).bool()
 
     fov_vals = combined[fov_inner_t]
 
-    # Histéresis más restrictiva (semillas p90, expansión p62) para ceñirse al
-    # trazado fino real del vaso y no ensanchar la máscara.
+    # Histéresis estricta (semillas p92, expansión p70) para ceñirse al trazado
+    # fino real del vaso y no ensanchar la máscara ni captar moteado de fondo.
     thresh_hi = torch.quantile(fov_vals, seed_pct)
     thresh_lo = torch.quantile(fov_vals, expand_pct)
 
@@ -138,13 +190,14 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     labeled_expand, _ = ndimage.label(expand_np)
     seed_labels = np.unique(labeled_expand[seeds_np])
     seed_labels = seed_labels[seed_labels > 0]
-    vessel_np = np.isin(labeled_expand, seed_labels).astype(np.uint8)
+    vessel_np = np.isin(labeled_expand, seed_labels).astype(bool)
 
-    # Limpieza: quitamos motas pequeñas y cerramos solo huecos mínimos (disk 1)
-    # para no engordar el trazado.
-    vessel_np = morphology.remove_small_objects(vessel_np.astype(bool), min_size=min_object_size)
-    vessel_np = morphology.binary_closing(vessel_np.astype(bool), disk(1))
-    vessel_np = vessel_np.astype(np.uint8) * fov_inner
+    # Limpieza: quitamos motas, cerramos solo huecos mínimos (disk 1) sin engordar
+    # el trazado, y descartamos manchas compactas no tubulares (moteado, brillos).
+    vessel_np = morphology.remove_small_objects(vessel_np, min_size=min_object_size)
+    vessel_np = morphology.binary_closing(vessel_np, disk(1))
+    vessel_np = keep_vessel_like(vessel_np, min_size=min_object_size, ecc_min=blob_ecc_min)
+    vessel_np = (vessel_np & fov_inner).astype(np.uint8)
 
     del frangi_resp, tophat_resp, combined
     if USE_GPU:
