@@ -1,4 +1,4 @@
-"""Demo Streamlit — Análisis automático de imágenes retinianas (TFM / CIPF).
+"""Demo Streamlit - Análisis automático de imágenes retinianas (TFM / CIPF).
 
 Pipeline de análisis de angiografías de fluoresceña de modelos murinos para el
 estudio de la retinopatía diabética:
@@ -66,7 +66,7 @@ VESSEL_COLOR = [0, 100, 255]    # azul (igual que el notebook)
 LEAK_COLOR = [255, 220, 0]      # amarillo (igual que el notebook)
 
 st.set_page_config(
-    page_title='Análisis de imágenes retinianas (v2) — TFM/CIPF',
+    page_title='Análisis de imágenes retinianas (v2) - TFM/CIPF',
     layout='wide',
 )
 
@@ -256,7 +256,7 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
     with col3:
         st.image(
             make_leak_overlay(res['img_rgb'], res['vessel_mask'], res['leakage_mask']),
-            caption=f'Fugas detectadas (amarillo) — N={res.get("n_leaks", 0)}',
+            caption=f'Fugas detectadas (amarillo) - N={res.get("n_leaks", 0)}',
             use_container_width=True,
         )
 
@@ -269,7 +269,7 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
 
 
 def main():
-    st.title('Análisis automático de imágenes retinianas — versión 2')
+    st.title('Análisis automático de imágenes retinianas - versión 2')
     st.markdown(
         'Análisis de angiografías de fluoresceína de modelos murinos para el '
         'estudio de la retinopatía diabética. Trabajo Fin de Máster en '
