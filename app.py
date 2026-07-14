@@ -195,7 +195,15 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
 
     # Métricas
     st.markdown('**Métricas vasculares**')
-    st.dataframe(metrics_dataframe(res), hide_index=True, use_container_width=True)
+    mdf = metrics_dataframe(res)
+    st.dataframe(mdf, hide_index=True, use_container_width=True)
+    with st.expander('Copiar métricas al portapapeles'):
+        st.caption(
+            'Pulse el icono de copiar (esquina superior derecha del recuadro) y '
+            'pegue en Excel o en una hoja de cálculo: cada métrica y su valor '
+            'quedan en columnas separadas.'
+        )
+        st.code(mdf.to_csv(sep='\t', index=False), language=None)
 
     st.divider()
 

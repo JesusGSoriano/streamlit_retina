@@ -91,7 +91,11 @@ def frangi_multiscale_gpu(img_clahe: np.ndarray,
 
 
 def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
-                        device: torch.device = None) -> tuple:
+                        device: torch.device = None,
+                        border_margin: int = 15,
+                        seed_pct: float = 0.90,
+                        expand_pct: float = 0.62,
+                        min_object_size: int = 50) -> tuple:
     if device is None:
         device = DEVICE
     H, W = img_clahe.shape
@@ -110,16 +114,23 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     combined = 0.7 * frangi_resp + 0.3 * tophat_resp
     combined = combined * fov_t.squeeze()
 
-    fov_mask_t = fov_t.squeeze().bool()
-    fov_vals = combined[fov_mask_t]
+    # Excluimos un margen del borde del FOV. El anillo brillante del borde de la
+    # imagen (arriba/abajo/izquierda/derecha del círculo del ojo) se colaba como
+    # vaso y falseaba las métricas. Erosionamos el FOV y trabajamos dentro de esa
+    # región tanto para calcular los umbrales (para que el brillo del borde no los
+    # sesgue) como para la máscara final.
+    fov_inner = morphology.binary_erosion(fov_mask.astype(bool), disk(border_margin))
+    fov_inner_t = torch.tensor(fov_inner.astype(np.float32), device=device).bool()
 
-    # Histéresis más permisiva que antes (semillas p85, expansión p55) para
-    # recuperar vasos finos y conexiones que el umbral anterior dejaba sueltos.
-    thresh_hi = torch.quantile(fov_vals, 0.85)
-    thresh_lo = torch.quantile(fov_vals, 0.55)
+    fov_vals = combined[fov_inner_t]
 
-    seeds_np = ((combined > thresh_hi) & fov_mask_t).cpu().numpy().astype(bool)
-    expand_np = ((combined > thresh_lo) & fov_mask_t).cpu().numpy().astype(bool)
+    # Histéresis más restrictiva (semillas p90, expansión p62) para ceñirse al
+    # trazado fino real del vaso y no ensanchar la máscara.
+    thresh_hi = torch.quantile(fov_vals, seed_pct)
+    thresh_lo = torch.quantile(fov_vals, expand_pct)
+
+    seeds_np = ((combined > thresh_hi) & fov_inner_t).cpu().numpy().astype(bool)
+    expand_np = ((combined > thresh_lo) & fov_inner_t).cpu().numpy().astype(bool)
 
     combined_np = combined.cpu().numpy()
 
@@ -129,10 +140,11 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     seed_labels = seed_labels[seed_labels > 0]
     vessel_np = np.isin(labeled_expand, seed_labels).astype(np.uint8)
 
-    # Limpieza más suave para no eliminar capilares finos legítimos
-    vessel_np = morphology.remove_small_objects(vessel_np.astype(bool), min_size=30)
-    vessel_np = morphology.binary_closing(vessel_np.astype(bool), disk(2))
-    vessel_np = vessel_np.astype(np.uint8) * fov_mask
+    # Limpieza: quitamos motas pequeñas y cerramos solo huecos mínimos (disk 1)
+    # para no engordar el trazado.
+    vessel_np = morphology.remove_small_objects(vessel_np.astype(bool), min_size=min_object_size)
+    vessel_np = morphology.binary_closing(vessel_np.astype(bool), disk(1))
+    vessel_np = vessel_np.astype(np.uint8) * fov_inner
 
     del frangi_resp, tophat_resp, combined
     if USE_GPU:
