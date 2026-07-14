@@ -19,6 +19,8 @@ import tempfile
 import numpy as np
 import pandas as pd
 import urllib.request
+from scipy import ndimage
+from skimage.morphology import skeletonize
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -97,16 +99,58 @@ def get_ensemble():
     return load_ensemble(DOWNLOAD_PATH, device=DEVICE)
 
 
-def make_vessel_overlay(img_rgb: np.ndarray, vessel_mask: np.ndarray) -> np.ndarray:
+# Gradiente de azul por calibre: fino = azul claro, grueso = azul oscuro.
+VESSEL_THIN = np.array([150, 200, 255])   # azul claro (vasos finos)
+VESSEL_THICK = np.array([0, 40, 150])     # azul oscuro (vasos gruesos)
+
+
+def caliber_color_map(vessel_mask: np.ndarray, skeleton=None,
+                      dist_transform=None) -> np.ndarray:
+    """Color RGB por píxel según el calibre local del vaso.
+
+    El calibre de cada punto se estima como 2x la distancia al borde en el eje
+    del vaso (esqueleto), propagada a toda la sección; así cada vaso se colorea
+    de forma uniforme según su grosor (fino claro, grueso oscuro).
+    """
+    vm = vessel_mask > 0
+    colors = np.zeros((*vm.shape, 3), dtype=np.uint8)
+    if not vm.any():
+        return colors
+    if dist_transform is None:
+        dist_transform = ndimage.distance_transform_edt(vm)
+    if skeleton is None:
+        skeleton = skeletonize(vm)
+    if not skeleton.any():
+        skeleton = vm
+    radius_on_skel = dist_transform * skeleton
+    # Cada píxel toma el calibre del punto de esqueleto más cercano.
+    _, inds = ndimage.distance_transform_edt(~skeleton.astype(bool), return_indices=True)
+    caliber = 2.0 * radius_on_skel[inds[0], inds[1]]
+    cv = caliber[vm]
+    cmax = float(np.percentile(cv, 95)) if cv.size else 1.0
+    cmin = 1.0
+    norm = np.clip((caliber - cmin) / max(cmax - cmin, 1e-6), 0.0, 1.0)
+    grad = (VESSEL_THIN + norm[..., None] * (VESSEL_THICK - VESSEL_THIN)).astype(np.uint8)
+    colors[vm] = grad[vm]
+    return colors
+
+
+def make_vessel_overlay(img_rgb: np.ndarray, vessel_mask: np.ndarray,
+                        skeleton=None, dist_transform=None) -> np.ndarray:
     overlay = img_rgb.copy()
-    overlay[vessel_mask > 0] = VESSEL_COLOR
+    vm = vessel_mask > 0
+    colors = caliber_color_map(vessel_mask, skeleton, dist_transform)
+    overlay[vm] = colors[vm]
     return overlay
 
 
 def make_leak_overlay(img_rgb: np.ndarray, vessel_mask: np.ndarray,
-                      leakage_mask: np.ndarray) -> np.ndarray:
+                      leakage_mask: np.ndarray,
+                      skeleton=None, dist_transform=None) -> np.ndarray:
     overlay = img_rgb.copy()
-    overlay[vessel_mask > 0] = VESSEL_COLOR
+    vm = vessel_mask > 0
+    colors = caliber_color_map(vessel_mask, skeleton, dist_transform)
+    overlay[vm] = colors[vm]
     overlay[leakage_mask > 0] = LEAK_COLOR
     return overlay
 
@@ -245,17 +289,20 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
         )
 
     # Imágenes
+    skel = res.get('skeleton')
+    dist = res.get('dist_transform')
     col1, col2, col3 = st.columns(3)
     with col1:
         st.image(res['img_rgb'], caption='Original', use_container_width=True)
     with col2:
         st.image(
-            make_vessel_overlay(res['img_rgb'], res['vessel_mask']),
-            caption='Red vascular segmentada (azul)', use_container_width=True,
+            make_vessel_overlay(res['img_rgb'], res['vessel_mask'], skel, dist),
+            caption='Red vascular segmentada (calibre: azul claro fino → azul oscuro grueso)',
+            use_container_width=True,
         )
     with col3:
         st.image(
-            make_leak_overlay(res['img_rgb'], res['vessel_mask'], res['leakage_mask']),
+            make_leak_overlay(res['img_rgb'], res['vessel_mask'], res['leakage_mask'], skel, dist),
             caption=f'Fugas detectadas (amarillo) - N={res.get("n_leaks", 0)}',
             use_container_width=True,
         )
