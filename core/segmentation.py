@@ -19,7 +19,7 @@ from .device import DEVICE
 from .preprocessing import tophat_gpu
 
 
-def inner_fov_mask(fov_mask: np.ndarray, shrink: float = 0.97,
+def inner_fov_mask(fov_mask: np.ndarray, shrink: float = 0.95,
                    erosion: int = 6) -> np.ndarray:
     """Región de análisis interior al FOV.
 
@@ -142,10 +142,10 @@ def frangi_multiscale_gpu(img_clahe: np.ndarray,
 def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         device: torch.device = None,
                         frangi_weight: float = 0.8,
-                        fov_shrink: float = 0.97,
+                        fov_shrink: float = 0.95,
                         fov_erosion: int = 6,
                         seed_pct: float = 0.92,
-                        expand_pct: float = 0.70,
+                        expand_pct: float = 0.74,
                         min_object_size: int = 60,
                         blob_ecc_min: float = 0.85) -> tuple:
     if device is None:
@@ -192,10 +192,12 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     seed_labels = seed_labels[seed_labels > 0]
     vessel_np = np.isin(labeled_expand, seed_labels).astype(bool)
 
-    # Limpieza: quitamos motas, cerramos solo huecos mínimos (disk 1) sin engordar
-    # el trazado, y descartamos manchas compactas no tubulares (moteado, brillos).
+    # Limpieza: quitamos motas, cerramos huecos mínimos y aplicamos una apertura
+    # (disk 1) para pulir los bordes dentados y las protuberancias, de modo que el
+    # trazado se ciña más a la vena real. Luego descartamos manchas no tubulares.
     vessel_np = morphology.remove_small_objects(vessel_np, min_size=min_object_size)
     vessel_np = morphology.binary_closing(vessel_np, disk(1))
+    vessel_np = morphology.binary_opening(vessel_np, disk(1))
     vessel_np = keep_vessel_like(vessel_np, min_size=min_object_size, ecc_min=blob_ecc_min)
     vessel_np = (vessel_np & fov_inner).astype(np.uint8)
 
