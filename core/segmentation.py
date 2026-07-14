@@ -19,7 +19,7 @@ from .device import DEVICE
 from .preprocessing import tophat_gpu
 
 
-def inner_fov_mask(fov_mask: np.ndarray, shrink: float = 0.94,
+def inner_fov_mask(fov_mask: np.ndarray, shrink: float = 0.97,
                    erosion: int = 6) -> np.ndarray:
     """Región de análisis interior al FOV.
 
@@ -142,7 +142,7 @@ def frangi_multiscale_gpu(img_clahe: np.ndarray,
 def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         device: torch.device = None,
                         frangi_weight: float = 0.8,
-                        fov_shrink: float = 0.94,
+                        fov_shrink: float = 0.97,
                         fov_erosion: int = 6,
                         seed_pct: float = 0.92,
                         expand_pct: float = 0.70,
