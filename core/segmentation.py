@@ -145,9 +145,10 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         fov_shrink: float = 0.95,
                         fov_erosion: int = 6,
                         seed_pct: float = 0.92,
-                        expand_pct: float = 0.74,
+                        expand_pct: float = 0.72,
                         min_object_size: int = 60,
-                        blob_ecc_min: float = 0.85) -> tuple:
+                        blob_ecc_min: float = 0.85,
+                        reflex_bridge: int = 3) -> tuple:
     if device is None:
         device = DEVICE
     H, W = img_clahe.shape
@@ -192,12 +193,15 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     seed_labels = seed_labels[seed_labels > 0]
     vessel_np = np.isin(labeled_expand, seed_labels).astype(bool)
 
-    # Limpieza: quitamos motas, cerramos huecos mínimos y aplicamos una apertura
-    # (disk 1) para pulir los bordes dentados y las protuberancias, de modo que el
-    # trazado se ciña más a la vena real. Luego descartamos manchas no tubulares.
+    # Limpieza y unificación del vaso.
+    # Las venas grandes tienen un reflejo luminoso central (una línea brillante en
+    # el centro) que parte la detección en dos paredes paralelas ("vías de tren").
+    # Cerramos con un disco del tamaño del reflejo para unir esas paredes en una
+    # sola banda y rellenamos la luz interior del vaso, de modo que una vena gruesa
+    # se tome como un único vaso ancho y no como varios finos.
     vessel_np = morphology.remove_small_objects(vessel_np, min_size=min_object_size)
-    vessel_np = morphology.binary_closing(vessel_np, disk(1))
-    vessel_np = morphology.binary_opening(vessel_np, disk(1))
+    vessel_np = morphology.binary_closing(vessel_np, disk(reflex_bridge))
+    vessel_np = morphology.remove_small_holes(vessel_np, area_threshold=2000)
     vessel_np = keep_vessel_like(vessel_np, min_size=min_object_size, ecc_min=blob_ecc_min)
     vessel_np = (vessel_np & fov_inner).astype(np.uint8)
 
