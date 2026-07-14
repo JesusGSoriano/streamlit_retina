@@ -1,0 +1,6 @@
+# El watcher de código de Streamlit inspecciona los módulos importados (incluido
+# torch) en un hilo aparte. Con torch eso puede provocar un bloqueo de imports
+# (_frozen_importlib._DeadlockError) al arrancar en Streamlit Cloud. Como la demo
+# no necesita recarga en caliente, desactivamos el watcher.
+[server]
+fileWatcherType = "none"

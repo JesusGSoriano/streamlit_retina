@@ -1,13 +1,13 @@
-"""Detección automática del dispositivo de cómputo (GPU si está disponible, CPU si no).
+"""Dispositivo de cómputo para la demo de Streamlit.
 
-En el despliegue (p.ej. Streamlit Community Cloud) será CPU; en local con CUDA
-usará la GPU sin cambiar nada del resto del código.
+En Streamlit Cloud el despliegue es siempre CPU, así que aquí fijamos CPU y no
+hay detección ni uso de GPU. La aceleración por GPU se reserva para la futura
+app de escritorio, que reutilizará estos módulos con su propia configuración.
 """
 
 import torch
 
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-USE_GPU = torch.cuda.is_available()
+DEVICE = torch.device('cpu')
 
 
 def get_device() -> torch.device:

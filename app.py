@@ -23,7 +23,7 @@ import urllib.request
 import streamlit as st
 import streamlit.components.v1 as components
 
-from core.device import DEVICE, USE_GPU
+from core.device import DEVICE
 from core.pipeline import analyze_image
 from core.classifier import load_ensemble, classify_image
 
@@ -281,7 +281,7 @@ def main():
     # Barra lateral
     with st.sidebar:
         st.header('Información')
-        st.write(f'**Dispositivo de cómputo:** {"GPU (CUDA)" if USE_GPU else "CPU"}')
+        st.write('**Dispositivo de cómputo:** CPU')
         if ensemble is not None:
             st.write('**Clasificador:** disponible')
             st.caption(

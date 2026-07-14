@@ -15,7 +15,7 @@ from skimage import morphology
 from skimage.morphology import disk, skeletonize
 from skimage.measure import label as sk_label, regionprops
 
-from .device import DEVICE, USE_GPU
+from .device import DEVICE
 from .preprocessing import tophat_gpu
 
 
@@ -200,8 +200,6 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     vessel_np = (vessel_np & fov_inner).astype(np.uint8)
 
     del frangi_resp, tophat_resp, combined
-    if USE_GPU:
-        torch.cuda.empty_cache()
 
     return vessel_np, combined_np
 
