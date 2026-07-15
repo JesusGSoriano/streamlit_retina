@@ -84,10 +84,10 @@ def compute_skeleton_metrics(vessel_mask: np.ndarray) -> dict:
                 tortuosities.append(brn / euc)
                 seg_lengths.append(brn)
 
-        # Calibre: mediana de 2x la transformada de distancia sobre los puntos
-        # INTERNOS del esqueleto (exactamente 2 vecinos), excluyendo los nodos de
-        # cruce/bifurcación (3+ vecinos) y el disco óptico, donde la transformada
-        # de distancia se dispara e infla el calibre.
+        # Calibre: tomamos la mediana de 2x la transformada de distancia sobre los
+        # puntos internos del esqueleto (los de exactamente 2 vecinos), dejando
+        # fuera los nodos de cruce y bifurcación (3 o más vecinos) y el disco
+        # óptico, donde la transformada de distancia se dispara e infla el calibre.
         neigh = skeleton_neighbor_count(skeleton)
         internal = skeleton & (neigh == 2)
         diam_internal = 2 * dist_transform[np.where(internal)]

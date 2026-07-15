@@ -106,11 +106,12 @@ VESSEL_THICK = np.array([0, 40, 150])     # azul oscuro (vasos gruesos)
 
 def caliber_color_map(vessel_mask: np.ndarray, skeleton=None,
                       dist_transform=None) -> np.ndarray:
-    """Color RGB por píxel según el calibre local del vaso.
+    """Damos a cada píxel un color RGB según el calibre local del vaso.
 
-    El calibre de cada punto se estima como 2x la distancia al borde en el eje
-    del vaso (esqueleto), propagada a toda la sección; así cada vaso se colorea
-    de forma uniforme según su grosor (fino claro, grueso oscuro).
+    Estimamos el calibre de cada punto como 2x la distancia al borde sobre el eje
+    del vaso (el esqueleto) y lo propagamos a toda la sección, de modo que cada
+    vaso queda coloreado de forma uniforme según su grosor: los finos en azul
+    claro y los gruesos en azul oscuro.
     """
     vm = vessel_mask > 0
     colors = np.zeros((*vm.shape, 3), dtype=np.uint8)
@@ -176,10 +177,10 @@ def metrics_dataframe(res: dict) -> pd.DataFrame:
 
 
 def render_metrics_table(mdf: pd.DataFrame, key: str):
-    """Tabla de métricas con un único botón 'Copiar' integrado.
+    """Mostramos la tabla de métricas con un único botón 'Copiar' integrado.
 
-    Al pulsarlo copia los datos en formato tabulado (TSV) al portapapeles, de
-    modo que al pegar en Excel/Sheets cada métrica y su valor caen en columnas.
+    Al pulsarlo copiamos los datos tabulados al portapapeles, de modo que al
+    pegar en Excel o Sheets cada métrica y su valor caen en columnas separadas.
     """
     headers = list(mdf.columns)
     body_rows = mdf.astype(str).values.tolist()
@@ -240,7 +241,7 @@ def render_metrics_table(mdf: pd.DataFrame, key: str):
 
 
 def analyze_uploaded_file(uploaded_file, ensemble):
-    """Guarda el fichero subido en disco y ejecuta pipeline + clasificación."""
+    """Guardamos el fichero subido en disco y ejecutamos el pipeline y la clasificación."""
     suffix = os.path.splitext(uploaded_file.name)[1] or '.tif'
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded_file.getbuffer())
@@ -297,7 +298,7 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
     with col2:
         st.image(
             make_vessel_overlay(res['img_rgb'], res['vessel_mask'], skel, dist),
-            caption='Red vascular segmentada (calibre: azul claro fino → azul oscuro grueso)',
+            caption='Red vascular segmentada (calibre: de azul claro en los finos a azul oscuro en los gruesos)',
             use_container_width=True,
         )
     with col3:

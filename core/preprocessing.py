@@ -1,11 +1,11 @@
 """Preprocesamiento de imágenes retinianas (angiografía de fluoresceína).
 
-Portado literalmente del notebook del TFM. El pipeline:
-  1. Extrae el canal verde y lo normaliza a [0, 1].
-  2. Calcula la máscara FOV (región circular del ojo).
-  3. Aplica CLAHE (ecualización adaptativa de contraste) y la restringe al FOV.
+Lo trasladamos tal cual del notebook del TFM. Hacemos tres cosas:
+  1. Extraemos el canal verde y lo normalizamos a [0, 1].
+  2. Calculamos la máscara FOV (la región circular del ojo).
+  3. Aplicamos CLAHE (ecualización adaptativa de contraste) y la limitamos al FOV.
 
-Las funciones reciben rutas/arrays y devuelven arrays. No contienen visualización.
+Las funciones reciben rutas o arrays y devuelven arrays. No pintan nada.
 """
 
 import numpy as np

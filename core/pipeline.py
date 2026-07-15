@@ -1,11 +1,12 @@
 """Orquestador del pipeline de análisis (sin visualización).
 
-Replica la función `analyze_image` del notebook: preprocesa, segmenta, extrae
-métricas vasculares y detecta fugas. Devuelve arrays y métricas en un dict, de
-forma que la interfaz (Streamlit, escritorio...) solo se encargue de mostrarlos.
+Reproducimos la función `analyze_image` del notebook: preprocesamos, segmentamos,
+extraemos las métricas vasculares y detectamos las fugas. Devolvemos los arrays y
+las métricas en un dict, para que la interfaz (Streamlit, escritorio...) se limite
+a mostrarlos.
 
-La clasificación se mantiene aparte (core/classifier.py) porque el ensemble se
-carga una sola vez y se reutiliza.
+Dejamos la clasificación aparte (core/classifier.py) porque el ensemble lo
+cargamos una sola vez y lo reutilizamos.
 """
 
 import os
@@ -27,9 +28,9 @@ _SKEL_SCALAR_KEYS = (
 
 
 def analyze_image(path: str, device: torch.device = None) -> dict:
-    """Ejecuta el pipeline completo sobre una imagen.
+    """Ejecutamos el pipeline completo sobre una imagen.
 
-    Devuelve un dict con:
+    Devolvemos un dict con:
       - arrays: img_rgb, img_green, img_clahe, fov_mask, vessel_mask,
                 frangi_response, leakage_mask, leak_props, skeleton, dist_transform
       - métricas: vessel_density_pct, n_vessel_segments, calibre_px,

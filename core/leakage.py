@@ -78,7 +78,7 @@ def compute_central_exclusion(img_clahe: np.ndarray, fov_mask: np.ndarray,
     central = morphology.binary_closing(central, disk(12))
     central = morphology.binary_dilation(central, disk(10))
 
-    # Nos quedamos SOLO con la componente conexa que toca el disco óptico,
+    # Nos quedamos solo con la componente conexa que toca el disco óptico,
     # más el propio círculo. Así excluimos la masa central contigua al disco
     # (incluida la zona de debajo donde salen las venas) pero no manchas densas
     # legítimamente lejanas de la periferia.

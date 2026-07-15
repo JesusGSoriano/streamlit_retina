@@ -1,17 +1,18 @@
-"""Clasificador Control vs db/db (ensemble de 5 ResNet18).
+"""Clasificador Control frente a db/db (ensemble de 5 ResNet18).
 
-Carga del ensemble entrenado (`clasificador_retina_ensemble.pt`) e inferencia.
+Cargamos el ensemble entrenado (`clasificador_retina_ensemble.pt`) y hacemos la
+inferencia. Nos mantenemos fieles al notebook del TFM:
 
-Fidelidad con el notebook del TFM:
-  - La entrada al modelo es el CANAL VERDE crudo de la imagen, replicado a 3
+  - La entrada al modelo es el canal verde crudo de la imagen, replicado a tres
     canales (no la imagen RGB ni la CLAHE).
-  - Transforms de test: Resize(224,224) -> ToTensor -> Normalize(mean=[0.5], std=[0.5]).
-  - Se hace softmax de cada modelo, se promedian las probabilidades de los 5
-    modelos y se decide con el threshold guardado (0.5). La clase 1 es db/db.
+  - Transforms de test: redimensionamos a 224x224, pasamos a tensor y
+    normalizamos con media 0.5 y desviación 0.5.
+  - Sacamos el softmax de cada modelo, promediamos las probabilidades de los
+    cinco y decidimos con el umbral guardado (0.5). La clase 1 es db/db.
 
-Nota: la arquitectura se construye con weights=None (sin descargar ImageNet),
-porque el state_dict del ensemble define todos los pesos. El resultado de
-inferencia es idéntico al del notebook.
+Construimos la arquitectura con weights=None (sin descargar ImageNet) porque el
+state_dict del ensemble ya define todos los pesos; el resultado de la inferencia
+es idéntico al del notebook.
 """
 
 from dataclasses import dataclass
@@ -61,7 +62,7 @@ class RetinaEnsemble:
 
 
 def load_ensemble(model_path: str, device: torch.device = None) -> RetinaEnsemble:
-    """Carga el diccionario .pt y reconstruye los 5 modelos del ensemble."""
+    """Cargamos el diccionario .pt y reconstruimos los cinco modelos del ensemble."""
     if device is None:
         device = DEVICE
 
@@ -93,8 +94,9 @@ def load_ensemble(model_path: str, device: torch.device = None) -> RetinaEnsembl
 
 
 def _to_model_input(img_rgb: np.ndarray, transform: transforms.Compose) -> torch.Tensor:
-    """Replica exactamente el preprocesado del RetinaDataset del notebook:
-    canal verde -> PIL en gris -> replicado a 3 canales -> transforms.
+    """Reproducimos el preprocesado del RetinaDataset del notebook: tomamos el
+    canal verde, lo pasamos a una imagen en gris, lo replicamos a tres canales y
+    le aplicamos los transforms.
     """
     img_green = Image.fromarray(np.asarray(img_rgb)[:, :, 1])
     img_rgb_gray = img_green.convert('RGB')
@@ -103,9 +105,9 @@ def _to_model_input(img_rgb: np.ndarray, transform: transforms.Compose) -> torch
 
 @torch.no_grad()
 def classify_image(ensemble: RetinaEnsemble, img_rgb: np.ndarray) -> dict:
-    """Clasifica una imagen (array RGB) con el ensemble.
+    """Clasificamos una imagen (array RGB) con el ensemble.
 
-    Devuelve:
+    Devolvemos:
         prob_dbdb : probabilidad media de la clase db/db (clase 1) [0, 1].
         pred      : 0 = Control, 1 = db/db.
         label     : 'Control' o 'db/db (Enfermo)'.

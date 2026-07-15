@@ -14,7 +14,7 @@ from scipy import ndimage
 from skimage import morphology
 from skimage.morphology import disk, skeletonize
 from skimage.measure import label as sk_label, regionprops
-from skimage.filters import gaussian
+from skimage.filters import gaussian, threshold_otsu
 
 from .device import DEVICE
 from .preprocessing import tophat_gpu
@@ -45,13 +45,14 @@ def inner_fov_mask(fov_mask: np.ndarray, shrink: float = 0.95,
 
 
 def remove_thick_blobs(mask: np.ndarray, max_radius: float = 16.0) -> np.ndarray:
-    """Elimina los núcleos gruesos (mácula, disco óptico, lesiones, brillos).
+    """Borramos los núcleos gruesos (mácula, disco óptico, lesiones, brillos).
 
-    Un vaso es siempre DELGADO: cada punto está cerca de un borde. Una mancha
-    tiene un núcleo grueso, con radio local (transformada de distancia) mayor que
-    cualquier vaso. Localizamos ese núcleo y lo borramos con su entorno, a nivel
-    de PÍXEL (no de componente), para no arrastrar los vasos finos que estén
-    conectados a la mancha (p.ej. por un cruce).
+    Un vaso siempre es delgado: cada punto está cerca de un borde. Una mancha, en
+    cambio, tiene un núcleo grueso, con un radio local (la transformada de
+    distancia) mayor que el de cualquier vaso. Localizamos ese núcleo y lo
+    borramos con su entorno píxel a píxel, no por componentes, para no llevarnos
+    por delante los vasos finos que puedan tocar la mancha (por ejemplo en un
+    cruce).
     """
     dist = ndimage.distance_transform_edt(mask)
     core = dist > max_radius
@@ -63,12 +64,11 @@ def remove_thick_blobs(mask: np.ndarray, max_radius: float = 16.0) -> np.ndarray
 
 def keep_vessel_like(mask: np.ndarray, min_size: int = 55,
                      ecc_min: float = 0.80, solidity_max: float = 0.55) -> np.ndarray:
-    """Conserva lo tubular/ramificado y descarta las manchas compactas.
+    """Conservamos lo tubular o ramificado y descartamos las manchas compactas.
 
-    Para cada componente conexa:
-      - Alargada (excentricidad alta) o ramificada (solidez baja): es un vaso o
-        el árbol vascular -> se conserva.
-      - Compacta y redondeada (moteado, restos de mancha) -> se descarta.
+    Para cada componente conexa: si es alargada (excentricidad alta) o ramificada
+    (solidez baja) la damos por vaso y la conservamos; si es compacta y redondeada
+    (moteado o restos de mancha) la descartamos.
     """
     labeled = sk_label(mask)
     if labeled.max() == 0:
@@ -95,7 +95,8 @@ def frangi_multiscale_gpu(img_clahe: np.ndarray,
 
     H, W = img_clahe.shape
 
-    # Imagen invertida (vasos brillantes → oscuros para Frangi)
+    # Invertimos la imagen: así los vasos brillantes pasan a oscuros, que es lo
+    # que espera Frangi.
     img_inv = 1.0 - img_clahe
     t = torch.tensor(img_inv, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
 
@@ -163,30 +164,31 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         local_sigma: float = 51.0,
                         contrast_k: float = 1.3,
                         contrast_floor: float = 0.02,
+                        strong_mult: float = 1.15,
                         min_object_size: int = 40,
                         blob_ecc_min: float = 0.80,
                         max_vessel_radius: float = 16.0,
                         fov_shrink: float = 0.95,
                         fov_erosion: int = 6,
                         min_hole_area: int = 1000) -> tuple:
-    """Segmentación vascular que sigue la silueta real del vaso.
+    """Segmentamos la red vascular ciñéndonos a la silueta real del vaso.
 
-    El ancho de cada vaso lo define su CONTRASTE de intensidad frente al fondo
-    local (dev = |imagen - fondo suave|), no la respuesta difusa del Frangi (que
-    se extiende más allá del vaso y lo engordaba). Así la máscara se ciñe a la
-    silueta y una vena ancha se toma como un único vaso sólido de su ancho (el
-    reflejo luminoso central queda dentro), sin partirla ni hincharla. El valor
-    absoluto hace que valga para vasos claros y oscuros.
+    El ancho de cada vaso lo marca su contraste de intensidad frente al fondo
+    local (dev = |imagen - fondo suave|), no la respuesta difusa del Frangi, que
+    se extiende más allá del vaso y lo engordaba. Así la máscara se pega a la
+    silueta y una vena ancha sale como un único vaso sólido de su ancho, con el
+    reflejo luminoso central dentro, sin partirla ni hincharla. Como tomamos el
+    valor absoluto, nos vale tanto para vasos claros como oscuros.
 
-    El umbral sobre el contraste es LOCAL y adaptativo: un píxel es vaso si su
-    contraste supera contrast_k veces el contraste medio de su entorno. Donde el
-    entorno es plano (zonas de capilares) el umbral baja y capta los vasos finos
-    y tenues; junto a venas fuertes sube y no las engorda. Un umbral global no
-    consigue ambas cosas a la vez, y un umbral demasiado alto en imágenes reales
-    difusas no detectaba nada.
+    El umbral sobre el contraste es local y adaptativo: damos por vaso un píxel si
+    su contraste supera contrast_k veces el contraste medio de su entorno. Donde
+    el entorno es plano (las zonas de capilares) el umbral baja y captamos los
+    vasos finos y tenues; junto a venas fuertes sube y no las engordamos. Con un
+    umbral global no sacábamos las dos cosas a la vez, y con uno demasiado alto no
+    detectábamos nada en imágenes reales difusas.
 
-    El Frangi + top-hat se siguen calculando para el módulo de fugas (que recibe
-    esta respuesta combinada).
+    Seguimos calculando Frangi y top-hat porque el módulo de fugas usa esa
+    respuesta combinada.
     """
     if device is None:
         device = DEVICE
@@ -214,12 +216,23 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     bg = gaussian(img_clahe, sigma=bg_sigma)
     dev = np.abs(img_clahe - bg)
 
-    # Umbral LOCAL adaptativo: contraste por encima de contrast_k veces el
-    # contraste medio del entorno, con un suelo absoluto para no captar ruido en
-    # zonas planas.
+    # Umbral local y adaptativo: pedimos que el contraste supere contrast_k veces
+    # el contraste medio del entorno, con un suelo absoluto para no coger ruido en
+    # las zonas planas.
     local = gaussian(dev, sigma=local_sigma)
     thresh = np.maximum(contrast_k * local, contrast_floor)
     vessel_np = (dev > thresh) & fov_inner
+
+    # Lo unimos con un umbral global de vasos fuertes (Otsu). Cerca del disco
+    # óptico el resplandor sube el umbral local y nos suprimía los vasos que
+    # convergen; este término los recupera sin depender del entorno.
+    dv = dev[fov_inner]
+    if dv.size > 0 and dv.max() > 0:
+        try:
+            strong = threshold_otsu(dv) * strong_mult
+            vessel_np = vessel_np | ((dev > strong) & fov_inner)
+        except Exception:
+            pass
 
     # Limpieza: quitamos motas, tapamos pinchazos pequeños (no huecos grandes, que
     # son fondo real entre vasos), borramos los núcleos gruesos no vasculares
