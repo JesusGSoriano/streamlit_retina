@@ -161,13 +161,13 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         device: torch.device = None,
                         combined_weight: float = 0.7,
                         seed_pct: float = 0.85,
-                        expand_pct: float = 0.55,
+                        expand_pct: float = 0.60,
                         bg_sigma: float = 25.0,
                         local_sigma: float = 51.0,
                         contrast_k: float = 1.3,
                         contrast_floor: float = 0.02,
-                        fill_radius: int = 15,
-                        min_object_size: int = 40,
+                        fill_radius: int = 12,
+                        min_object_size: int = 120,
                         blob_ecc_min: float = 0.80,
                         fov_shrink: float = 0.95,
                         fov_erosion: int = 6) -> tuple:
@@ -225,9 +225,15 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     seed_labels = seed_labels[seed_labels > 0]
     frangi_mask = np.isin(labeled_expand, seed_labels)
 
+    # Quitamos el moteado ANTES de rellenar: los capilares reales van conectados y
+    # forman componentes grandes, mientras que el ruido son blobs pequeños y
+    # aislados. Así el relleno posterior solo actúa alrededor de vasos de verdad.
+    frangi_mask = morphology.remove_small_objects(frangi_mask, min_size=min_object_size)
+    frangi_mask = keep_vessel_like(frangi_mask, min_size=min_object_size, ecc_min=blob_ecc_min)
+
     # Relleno por contraste de intensidad, confirmado por cercanía a un vaso ya
-    # detectado. Rellena y da el ancho real de las venas anchas (une el reflejo
-    # central) sin colar la mácula.
+    # detectado (y ya limpio). Rellena y da el ancho real de las venas anchas (une
+    # el reflejo central) sin colar la mácula ni el ruido.
     bg = gaussian(img_clahe, sigma=bg_sigma)
     dev = np.abs(img_clahe - bg)
     local = gaussian(dev, sigma=local_sigma)
@@ -235,7 +241,7 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     near_vessel = morphology.binary_dilation(frangi_mask, disk(fill_radius))
     vessel_np = frangi_mask | (dev_mask & near_vessel)
 
-    # Limpieza: quitamos motas y nos quedamos con lo tubular/ramificado.
+    # Limpieza final: cerramos huecos mínimos y nos quedamos con lo tubular.
     vessel_np = morphology.remove_small_objects(vessel_np, min_size=min_object_size)
     vessel_np = morphology.binary_closing(vessel_np, disk(1))
     vessel_np = keep_vessel_like(vessel_np, min_size=min_object_size, ecc_min=blob_ecc_min)
