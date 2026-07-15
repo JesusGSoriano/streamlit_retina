@@ -14,7 +14,7 @@ from scipy import ndimage
 from skimage import morphology
 from skimage.morphology import disk, skeletonize
 from skimage.measure import label as sk_label, regionprops
-from skimage.filters import gaussian, threshold_otsu
+from skimage.filters import gaussian
 
 from .device import DEVICE
 from .preprocessing import tophat_gpu
@@ -160,35 +160,36 @@ def frangi_multiscale_gpu(img_clahe: np.ndarray,
 def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
                         device: torch.device = None,
                         combined_weight: float = 0.7,
+                        seed_pct: float = 0.85,
+                        expand_pct: float = 0.55,
                         bg_sigma: float = 25.0,
                         local_sigma: float = 51.0,
                         contrast_k: float = 1.3,
                         contrast_floor: float = 0.02,
-                        strong_mult: float = 1.15,
-                        min_object_size: int = 55,
+                        fill_radius: int = 15,
+                        min_object_size: int = 40,
                         blob_ecc_min: float = 0.80,
-                        max_vessel_radius: float = 16.0,
                         fov_shrink: float = 0.95,
-                        fov_erosion: int = 6,
-                        min_hole_area: int = 1000) -> tuple:
-    """Segmentamos la red vascular ciñéndonos a la silueta real del vaso.
+                        fov_erosion: int = 6) -> tuple:
+    """Segmentamos la red vascular combinando lo mejor de dos enfoques.
 
-    El ancho de cada vaso lo marca su contraste de intensidad frente al fondo
-    local (dev = |imagen - fondo suave|), no la respuesta difusa del Frangi, que
-    se extiende más allá del vaso y lo engordaba. Así la máscara se pega a la
-    silueta y una vena ancha sale como un único vaso sólido de su ancho, con el
-    reflejo luminoso central dentro, sin partirla ni hincharla. Como tomamos el
-    valor absoluto, nos vale tanto para vasos claros como oscuros.
+    Partimos de la DETECCIÓN del notebook: sobre el realce combinado (Frangi +
+    top-hat) hacemos una histéresis permisiva (semillas p85, expansión p55) y
+    propagamos por reconstrucción. Esto capta muchos vasos, incluidos los
+    capilares finos, y coge bien la convergencia del disco óptico; además, como el
+    Frangi es específico de estructuras tubulares, no marca la mácula ni las
+    manchas suaves.
 
-    El umbral sobre el contraste es local y adaptativo: damos por vaso un píxel si
-    su contraste supera contrast_k veces el contraste medio de su entorno. Donde
-    el entorno es plano (las zonas de capilares) el umbral baja y captamos los
-    vasos finos y tenues; junto a venas fuertes sube y no las engordamos. Con un
-    umbral global no sacábamos las dos cosas a la vez, y con uno demasiado alto no
-    detectábamos nada en imágenes reales difusas.
+    Ese enfoque, por sí solo, parte las venas anchas en dos (el reflejo luminoso
+    central deja un hueco) y no da un ancho ajustado. Para arreglarlo RELLENAMOS
+    con el contraste de intensidad (dev = |imagen - fondo suave|), pero solo cerca
+    de donde ya hay vaso detectado por Frangi. Así las venas anchas salen como un
+    único vaso sólido de su ancho real, sin multiplicarlas, y sin reintroducir la
+    mácula (que no está pegada a ningún vaso).
 
-    Seguimos calculando Frangi y top-hat porque el módulo de fugas usa esa
-    respuesta combinada.
+    Por último recortamos al interior circular del FOV (fuera bordes) y nos
+    quedamos con lo tubular o ramificado. La respuesta combinada se devuelve para
+    el módulo de fugas.
     """
     if device is None:
         device = DEVICE
@@ -202,45 +203,41 @@ def segment_vessels_gpu(img_clahe: np.ndarray, fov_mask: np.ndarray,
     if th_max > 0:
         tophat_resp = tophat_resp / th_max
 
-    # Realce combinado (Frangi vasos oscuros, top-hat vasos claros). Se devuelve
-    # para el módulo de fugas.
+    # Realce combinado (Frangi para vasos oscuros, top-hat para los claros). Lo
+    # devolvemos también para el módulo de fugas.
     combined = (combined_weight * frangi_resp + (1.0 - combined_weight) * tophat_resp) * fov_t
     combined_np = combined.cpu().numpy()
 
-    # Región de análisis: interior circular del FOV (excluye el anillo del borde y
-    # los bloques brillantes de los extremos).
+    # Región de análisis: interior circular del FOV (deja fuera el anillo del borde
+    # y los bloques brillantes de los extremos).
     fov_inner = inner_fov_mask(fov_mask, shrink=fov_shrink, erosion=fov_erosion)
 
-    # Contraste de intensidad frente al fondo local (vale para vasos claros y
-    # oscuros: valor absoluto).
+    # Detección del notebook: histéresis permisiva sobre el realce combinado.
+    vals = combined_np[fov_inner]
+    if vals.size == 0:
+        return np.zeros_like(fov_mask, dtype=np.uint8), combined_np
+    thresh_hi = np.quantile(vals, seed_pct)
+    thresh_lo = np.quantile(vals, expand_pct)
+    seeds = (combined_np > thresh_hi) & fov_inner
+    expand = (combined_np > thresh_lo) & fov_inner
+    labeled_expand, _ = ndimage.label(expand)
+    seed_labels = np.unique(labeled_expand[seeds])
+    seed_labels = seed_labels[seed_labels > 0]
+    frangi_mask = np.isin(labeled_expand, seed_labels)
+
+    # Relleno por contraste de intensidad, confirmado por cercanía a un vaso ya
+    # detectado. Rellena y da el ancho real de las venas anchas (une el reflejo
+    # central) sin colar la mácula.
     bg = gaussian(img_clahe, sigma=bg_sigma)
     dev = np.abs(img_clahe - bg)
-
-    # Umbral local y adaptativo: pedimos que el contraste supere contrast_k veces
-    # el contraste medio del entorno, con un suelo absoluto para no coger ruido en
-    # las zonas planas.
     local = gaussian(dev, sigma=local_sigma)
-    thresh = np.maximum(contrast_k * local, contrast_floor)
-    vessel_np = (dev > thresh) & fov_inner
+    dev_mask = (dev > np.maximum(contrast_k * local, contrast_floor)) & fov_inner
+    near_vessel = morphology.binary_dilation(frangi_mask, disk(fill_radius))
+    vessel_np = frangi_mask | (dev_mask & near_vessel)
 
-    # Lo unimos con un umbral global de vasos fuertes (Otsu). Cerca del disco
-    # óptico el resplandor sube el umbral local y nos suprimía los vasos que
-    # convergen; este término los recupera sin depender del entorno.
-    dv = dev[fov_inner]
-    if dv.size > 0 and dv.max() > 0:
-        try:
-            strong = threshold_otsu(dv) * strong_mult
-            vessel_np = vessel_np | ((dev > strong) & fov_inner)
-        except Exception:
-            pass
-
-    # Limpieza: quitamos motas, tapamos pinchazos pequeños (no huecos grandes, que
-    # son fondo real entre vasos), borramos los núcleos gruesos no vasculares
-    # (mácula, disco, lesiones) y descartamos manchas compactas no tubulares.
+    # Limpieza: quitamos motas y nos quedamos con lo tubular/ramificado.
     vessel_np = morphology.remove_small_objects(vessel_np, min_size=min_object_size)
-    vessel_np = morphology.remove_small_holes(vessel_np, area_threshold=min_hole_area)
-    vessel_np = remove_thick_blobs(vessel_np, max_radius=max_vessel_radius)
-    vessel_np = morphology.remove_small_objects(vessel_np, min_size=min_object_size)
+    vessel_np = morphology.binary_closing(vessel_np, disk(1))
     vessel_np = keep_vessel_like(vessel_np, min_size=min_object_size, ecc_min=blob_ecc_min)
     vessel_np = (vessel_np & fov_inner).astype(np.uint8)
 
