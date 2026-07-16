@@ -278,16 +278,35 @@ def render_result(name: str, res: dict, clf: dict, ensemble):
             st.error(f'Clasificación: **{label}**')
         else:
             st.success(f'Clasificación: **{label}**')
+
+        probs = clf['per_model_probs']
+        n_agree = clf.get('n_agree', 0)
+        n_models = clf.get('n_models', len(probs))
+        temperature = clf.get('temperature', 1.0)
+        p_side = prob if clf['pred'] == 1 else 1 - prob
+        side_probs = [p if clf['pred'] == 1 else 1 - p for p in probs]
+
         c1, c2 = st.columns(2)
-        c1.metric('Probabilidad db/db', f'{prob*100:.1f} %')
-        c2.metric('Probabilidad Control', f'{(1-prob)*100:.1f} %')
-        st.progress(prob)
-        st.caption(
-            'Probabilidad media del ensemble de 5 modelos. '
-            f'Umbral de decisión: {ensemble.threshold:.2f}. '
-            'Probabilidades por modelo: '
-            + ', '.join(f'{p:.2f}' for p in clf['per_model_probs'])
-        )
+        c1.metric('Acuerdo del ensemble', f'{n_agree} de {n_models} modelos')
+        c2.metric('Probabilidad del modelo', f'{p_side*100:.1f} %')
+        st.progress(p_side)
+
+        if temperature <= 1.0 + 1e-6:
+            st.caption(
+                'Aviso: la probabilidad es la salida cruda del modelo, que tiende '
+                'a ser muy alta (los modelos están sin calibrar), así que no debe '
+                'leerse como una confianza exacta. La señal más fiable es el '
+                'acuerdo entre los modelos del ensemble. '
+                f'Rango por modelo: {min(side_probs)*100:.1f}–{max(side_probs)*100:.1f} %. '
+                f'Umbral de decisión: {ensemble.threshold:.2f}.'
+            )
+        else:
+            st.caption(
+                f'Probabilidad calibrada (temperature scaling, T={temperature:.2f}). '
+                f'Acuerdo: {n_agree}/{n_models} modelos. '
+                f'Rango por modelo: {min(side_probs)*100:.1f}–{max(side_probs)*100:.1f} %. '
+                f'Umbral de decisión: {ensemble.threshold:.2f}.'
+            )
 
     # Imágenes
     skel = res.get('skeleton')

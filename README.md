@@ -96,6 +96,50 @@ replicado a 3 canales, redimensionado a 224×224 y normalizado con
 `mean=[0.5], std=[0.5]`. Se promedian las probabilidades softmax de los 5
 modelos y se decide con el `threshold`. La clase 1 es **db/db**.
 
+### Calibración de la confianza (temperature scaling)
+
+Estos modelos, como casi todas las redes entrenadas con cross-entropy, son
+**sobreconfiados**: la probabilidad que dan sale casi siempre pegada al 99-100 %,
+aunque no estén tan seguros. Para que el porcentaje sea informativo se aplica
+*temperature scaling*: se divide el logit de la probabilidad del ensemble por una
+temperatura `T` (con `T > 1` la probabilidad se acerca al 50 %).
+
+La app toma `T`, por orden, de la variable de entorno `RETINA_TEMPERATURE`, de la
+clave `temperature` del `.pt`, o `1.0` si no hay ninguna (sin calibrar). Para
+ajustar `T` con las predicciones out-of-fold del LOAO (que sí son held-out),
+usando la probabilidad del ensemble `all_proba` y las etiquetas `fold_true` que
+ya calcula el notebook:
+
+```python
+import numpy as np, torch
+import torch.nn.functional as F
+
+p = np.clip(all_proba, 1e-6, 1 - 1e-6)
+z = torch.tensor(np.log(p / (1 - p)), dtype=torch.float32)   # logit del ensemble
+y = torch.tensor(fold_true, dtype=torch.float32)
+T = torch.nn.Parameter(torch.ones(1))
+opt = torch.optim.LBFGS([T], lr=0.1, max_iter=200)
+
+def closure():
+    opt.zero_grad()
+    loss = F.binary_cross_entropy_with_logits(z / T, y)
+    loss.backward()
+    return loss
+
+opt.step(closure)
+T_opt = float(T.detach())
+print('Temperatura óptima:', T_opt)
+
+# Guardarla en el .pt para que la demo la use:
+ckpt = torch.load('clasificador_retina_ensemble.pt', weights_only=False)
+ckpt['temperature'] = T_opt
+torch.save(ckpt, 'clasificador_retina_ensemble.pt')
+```
+
+Mientras no haya `T` calibrada, la app muestra la probabilidad cruda con un aviso
+y se apoya en el **acuerdo entre los 5 modelos** como señal de confianza (esa sí
+es fiable sin calibrar).
+
 ---
 
 ## Despliegue en Streamlit Community Cloud

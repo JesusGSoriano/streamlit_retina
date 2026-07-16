@@ -15,6 +15,7 @@ state_dict del ensemble ya define todos los pesos; el resultado de la inferencia
 es idéntico al del notebook.
 """
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -59,10 +60,16 @@ class RetinaEnsemble:
     seeds: list
     animals: list
     device: torch.device
+    temperature: float = 1.0   # temperature scaling; 1.0 = sin calibrar
 
 
 def load_ensemble(model_path: str, device: torch.device = None) -> RetinaEnsemble:
-    """Cargamos el diccionario .pt y reconstruimos los cinco modelos del ensemble."""
+    """Cargamos el diccionario .pt y reconstruimos los cinco modelos del ensemble.
+
+    La temperatura de calibración (temperature scaling) se toma, por orden, de la
+    variable de entorno RETINA_TEMPERATURE, de la clave 'temperature' del .pt, o
+    1.0 si no hay ninguna (sin calibrar).
+    """
     if device is None:
         device = DEVICE
 
@@ -73,6 +80,7 @@ def load_ensemble(model_path: str, device: torch.device = None) -> RetinaEnsembl
     threshold = float(ckpt.get('threshold', 0.5))
     seeds = list(ckpt.get('seeds', []))
     animals = list(ckpt.get('animals', []))
+    temperature = float(os.environ.get('RETINA_TEMPERATURE', ckpt.get('temperature', 1.0)))
 
     loaded_models = []
     for sd in state_dicts:
@@ -90,6 +98,7 @@ def load_ensemble(model_path: str, device: torch.device = None) -> RetinaEnsembl
         seeds=seeds,
         animals=animals,
         device=device,
+        temperature=temperature,
     )
 
 
@@ -107,26 +116,54 @@ def _to_model_input(img_rgb: np.ndarray, transform: transforms.Compose) -> torch
 def classify_image(ensemble: RetinaEnsemble, img_rgb: np.ndarray) -> dict:
     """Clasificamos una imagen (array RGB) con el ensemble.
 
+    Estos modelos, de fábrica, dan probabilidades sobreconfiadas (pegadas a 0 o a
+    1), así que sin calibrar no reflejan la confianza real. Lo corregimos con
+    temperature scaling: dividimos el logit de la probabilidad del ensemble por
+    una temperatura T (T > 1 acerca la probabilidad a 0.5). Con T = 1.0 no se
+    calibra nada. T se ajusta sobre datos de validación (ver README).
+
     Devolvemos:
         prob_dbdb : probabilidad media de la clase db/db (clase 1) [0, 1].
         pred      : 0 = Control, 1 = db/db.
         label     : 'Control' o 'db/db (Enfermo)'.
         per_model_probs : probabilidad db/db de cada uno de los 5 modelos.
+        n_agree   : cuántos de los modelos coinciden con el veredicto del ensemble.
+        n_models  : número de modelos del ensemble.
+        temperature : temperatura de calibración aplicada.
     """
     x = _to_model_input(img_rgb, ensemble.transform).unsqueeze(0).to(ensemble.device)
+    T = max(float(ensemble.temperature), 1e-6)
 
+    # Probabilidad cruda de cada modelo (sin calibrar). La usamos para el acuerdo
+    # y el rango del ensemble.
     per_model_probs = []
     for model in ensemble.models:
         prob_db = torch.softmax(model(x), dim=1)[0, 1].item()
         per_model_probs.append(prob_db)
 
-    prob_dbdb = float(np.mean(per_model_probs))
+    prob_raw = float(np.mean(per_model_probs))
+
+    # Calibración por temperatura sobre el logit de la probabilidad del ensemble:
+    # con T > 1 la acercamos hacia 0.5, corrigiendo la sobreconfianza. T se ajusta
+    # sobre datos de validación (ver README).
+    p = min(max(prob_raw, 1e-6), 1 - 1e-6)
+    logit = np.log(p / (1 - p))
+    prob_dbdb = float(1.0 / (1.0 + np.exp(-logit / T)))
+
     pred = int(prob_dbdb >= ensemble.threshold)
     label = 'db/db (Enfermo)' if pred == 1 else 'Control'
+
+    # Acuerdo del ensemble: cuántos modelos, por separado, deciden lo mismo que la
+    # media. Es una señal de robustez que no depende de la calibración.
+    n_agree = int(sum(1 for pm in per_model_probs
+                      if int(pm >= ensemble.threshold) == pred))
 
     return {
         'prob_dbdb': prob_dbdb,
         'pred': pred,
         'label': label,
         'per_model_probs': per_model_probs,
+        'n_agree': n_agree,
+        'n_models': len(ensemble.models),
+        'temperature': T,
     }
